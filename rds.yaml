@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >-
+  MultiZone RDS
+
+Metadata: 
+  # Control the UI display when running this template from the AWS Management Console:
+  AWS::CloudFormation::Interface: 
+    ParameterGroups:
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+          - VpcId
+      - Label:
+          default: "RDS Configuration"
+        Parameters:
+          - DBInstanceClass
+          - DBAllocatedStorage
+          - DBName
+          - DBUser
+          - DBPassword
+          - MultiAZDatabase
+          - RDSSubnets
+
+Parameters:
+  VpcId:
+    Description: A VPC ID
+    Type: String
+  DBName:
+    Default: myDatabase
+    Description: MySQL database name
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBUser:
+    NoEcho: 'true'
+    Description: Username for MySQL database access
+    Type: String
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBPassword:
+    NoEcho: 'true'
+    Description: Password for MySQL database access
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+  DBAllocatedStorage:
+    Default: '5'
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '1024'
+    ConstraintDescription: must be between 5 and 1024Gb.
+  DBInstanceClass:
+    Description: The database instance type
+    Type: String
+    Default: db.t2.micro
+  MultiAZDatabase:
+    Default: 'true'
+    Description: Create a Multi-AZ MySQL Amazon RDS database instance
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    ConstraintDescription: must be either true or false.
+  PrivateSubnet1Id:
+    Description: private DMZ subnet 1 ID located in Availability Zone 1
+    Type: String
+  PrivateSubnet2Id:
+    Description: private DMZ subnet 2 ID located in Availability Zone 2
+    Type: String
+  PrivateSubnet3Id:
+    Description: private DMZ subnet 3 ID located in Availability Zone 3
+    Type: String
+
+Conditions:
+  MultiAZDatabase: !Equals [ !Ref MultiAZDatabase, True ]
+
+Resources:
+  # RDS Subnet Group
+  RDSDBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: "description"
+      DBSubnetGroupName: "RDS_DB_PrivSubnet"
+      SubnetIds:
+        - !Ref PrivateSubnet1Id
+        - !Ref PrivateSubnet2Id
+        - !Ref PrivateSubnet3Id
+  # RDS security group inbound and outbound access
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: RDSSecurityGroup
+      VpcId: !Ref VpcId
+      GroupDescription: Enable MySql access via user defined port
+      SecurityGroupIngress:
+        - CidrIp: 10.0.0.0/16
+          FromPort: 3306
+          IpProtocol: tcp
+          ToPort: 3306
+  MySQLDatabase:
+    Type: 'AWS::RDS::DBInstance'
+    DeletionPolicy: "Snapshot"
+    Properties:
+      Engine: MySQL
+      DBName: !Ref DBName
+      StorageType: gp2
+      MultiAZ: !Ref MultiAZDatabase
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      PubliclyAccessible: True
+      DBSubnetGroupName: !Ref RDSDBSubnetGroup
+      VPCSecurityGroups:
+          - Ref: RDSSecurityGroup
+  ReplicaDB:
+    Type: AWS::RDS::DBInstance
+    Condition: MultiAZDatabase
+    Properties:
+      SourceDBInstanceIdentifier: !Ref MySQLDatabase
+      DBInstanceClass: !Ref DBInstanceClass
+      Tags:
+      - Key: Name
+        Value: Read Replica Database
+
+Outputs:
+  RDSDBSubnetGroup:
+        Description: 'RDS Private Subnet Group'
+        Value:
+          Ref: 'RDSDBSubnetGroup'
+  RDSSecurityGroup:
+      Description: 'RDS Security Group'
+      Value:
+        Ref: 'RDSSecurityGroup'
