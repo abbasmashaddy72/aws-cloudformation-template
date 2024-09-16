@@ -1,0 +1,280 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Security Groups for Load Balancer, Web Servers, Database Server, Cache Server, and Worker Server with up to 6 trusted IPs for SSH access.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The ID of the VPC where the resources will be created.
+
+  ProjectName:
+    Type: String
+    Default: Zephyr-IT-Pro
+    Description: Name of the project used for naming resources.
+
+  TrustedIP1:
+    Type: String
+    Default: ""
+    Description: First trusted IP for SSH access (e.g., 192.168.1.1/32).
+
+  TrustedIP2:
+    Type: String
+    Default: ""
+    Description: Second trusted IP for SSH access (e.g., 203.0.113.0/24).
+
+  TrustedIP3:
+    Type: String
+    Default: ""
+    Description: Third trusted IP for SSH access.
+
+  TrustedIP4:
+    Type: String
+    Default: ""
+    Description: Fourth trusted IP for SSH access.
+
+  TrustedIP5:
+    Type: String
+    Default: ""
+    Description: Fifth trusted IP for SSH access.
+
+  TrustedIP6:
+    Type: String
+    Default: ""
+    Description: Sixth trusted IP for SSH access.
+
+Conditions:
+  HasTrustedIP1: !Not [!Equals [!Ref TrustedIP1, ""]]
+  HasTrustedIP2: !Not [!Equals [!Ref TrustedIP2, ""]]
+  HasTrustedIP3: !Not [!Equals [!Ref TrustedIP3, ""]]
+  HasTrustedIP4: !Not [!Equals [!Ref TrustedIP4, ""]]
+  HasTrustedIP5: !Not [!Equals [!Ref TrustedIP5, ""]]
+  HasTrustedIP6: !Not [!Equals [!Ref TrustedIP6, ""]]
+
+Resources:
+  # Security Group for SSH Access from Trusted IPs
+  SSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for SSH Access from Trusted IPs
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-SSHSecurityGroup"
+      SecurityGroupIngress:
+        # Allow SSH from each trusted IP
+        - !If
+          - HasTrustedIP1
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref TrustedIP1
+          - !Ref AWS::NoValue
+        - !If
+          - HasTrustedIP2
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref TrustedIP2
+          - !Ref AWS::NoValue
+        - !If
+          - HasTrustedIP3
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref TrustedIP3
+          - !Ref AWS::NoValue
+        - !If
+          - HasTrustedIP4
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref TrustedIP4
+          - !Ref AWS::NoValue
+        - !If
+          - HasTrustedIP5
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref TrustedIP5
+          - !Ref AWS::NoValue
+        - !If
+          - HasTrustedIP6
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref TrustedIP6
+          - !Ref AWS::NoValue
+
+  # Security Group for Load Balancer
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Load Balancer
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-LoadBalancerSG"
+      SecurityGroupIngress:
+        # Allow HTTP and HTTPS from anywhere
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  # Security Group for Web Servers
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Web Servers
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-WebServerSG"
+      SecurityGroupIngress:
+        # Allow HTTP/HTTPS from Load Balancer SG
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+
+  # Security Group for Database Server
+  DatabaseServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Database Server
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-DatabaseServerSG"
+      SecurityGroupIngress:
+        # Allow MySQL from Web Servers SG
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+
+  # Security Group for Cache Server (Redis and Memcached)
+  CacheServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Cache Server
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-CacheServerSG"
+      SecurityGroupIngress:
+        # Allow Redis from Web Servers SG
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+        # Allow Memcached from Web Servers SG
+        - IpProtocol: tcp
+          FromPort: 11211
+          ToPort: 11211
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+
+  # Security Group for Worker Servers
+  WorkerServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Worker Servers
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-WorkerServerSG"
+      SecurityGroupIngress:
+        # Allow MySQL and Redis from Web Servers SG
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+        # Allow Memcached from Web Servers SG
+        - IpProtocol: tcp
+          FromPort: 11211
+          ToPort: 11211
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+
+  # Egress rules moved to avoid circular dependency
+  LoadBalancerSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref LoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      DestinationSecurityGroupId: !Ref WebServerSecurityGroup
+
+  LoadBalancerSecurityGroupEgressHTTPS:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref LoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !Ref WebServerSecurityGroup
+
+  WebServerSecurityGroupEgressMySQL:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WebServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      DestinationSecurityGroupId: !Ref DatabaseServerSecurityGroup
+
+  WebServerSecurityGroupEgressRedis:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WebServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      DestinationSecurityGroupId: !Ref CacheServerSecurityGroup
+
+  WebServerSecurityGroupEgressMemcached:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WebServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 11211
+      ToPort: 11211
+      DestinationSecurityGroupId: !Ref CacheServerSecurityGroup
+
+  WorkerServerSecurityGroupEgressMySQL:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WorkerServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      DestinationSecurityGroupId: !Ref DatabaseServerSecurityGroup
+
+  WorkerServerSecurityGroupEgressRedis:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WorkerServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      DestinationSecurityGroupId: !Ref CacheServerSecurityGroup
+
+  WorkerServerSecurityGroupEgressMemcached:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WorkerServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 11211
+      ToPort: 11211
+      DestinationSecurityGroupId: !Ref CacheServerSecurityGroup
