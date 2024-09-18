@@ -2,6 +2,7 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: Security Groups for Load Balancer, Web Servers, Database Server, Cache Server, and Worker Server with up to 6 trusted IPs for SSH access.
 
 Parameters:
+  # Parameters for VPC and Project Name
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: The ID of the VPC where the resources will be created.
@@ -11,6 +12,7 @@ Parameters:
     Default: Zephyr-IT-Pro
     Description: Name of the project used for naming resources.
 
+  # Parameters for up to 6 Trusted IPs for SSH access
   TrustedIP1:
     Type: String
     Default: ""
@@ -41,13 +43,27 @@ Parameters:
     Default: ""
     Description: Sixth trusted IP for SSH access.
 
+  # Parameters for Trusted IPs for direct Database and Cache access
+  TrustedIPForDBCache1:
+    Type: String
+    Default: ""
+    Description: First trusted IP for direct Database and Cache access (e.g., 198.51.100.10/32).
+
+  TrustedIPForDBCache2:
+    Type: String
+    Default: ""
+    Description: Second trusted IP for direct Database and Cache access (e.g., 198.51.100.11/32).
+
 Conditions:
+  # Conditions to check if each Trusted IP is provided
   HasTrustedIP1: !Not [!Equals [!Ref TrustedIP1, ""]]
   HasTrustedIP2: !Not [!Equals [!Ref TrustedIP2, ""]]
   HasTrustedIP3: !Not [!Equals [!Ref TrustedIP3, ""]]
   HasTrustedIP4: !Not [!Equals [!Ref TrustedIP4, ""]]
   HasTrustedIP5: !Not [!Equals [!Ref TrustedIP5, ""]]
   HasTrustedIP6: !Not [!Equals [!Ref TrustedIP6, ""]]
+  HasTrustedDBCacheIP1: !Not [!Equals [!Ref TrustedIPForDBCache1, ""]]
+  HasTrustedDBCacheIP2: !Not [!Equals [!Ref TrustedIPForDBCache2, ""]]
 
 Resources:
   # Security Group for SSH Access from Trusted IPs
@@ -60,7 +76,7 @@ Resources:
         - Key: Name
           Value: !Sub "${ProjectName}-SSHSecurityGroup"
       SecurityGroupIngress:
-        # Allow SSH from each trusted IP
+        # Allows SSH (Port 22) access from each Trusted IP, only if provided
         - !If
           - HasTrustedIP1
           - IpProtocol: tcp
@@ -104,7 +120,9 @@ Resources:
             CidrIp: !Ref TrustedIP6
           - !Ref AWS::NoValue
 
-  # Security Group for Load Balancer
+  # Security Groups for Load Balancer, Web Servers, Database Server, Cache Server, and Worker Servers
+  # Created first without rules to avoid circular dependency issues
+
   LoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -113,18 +131,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-LoadBalancerSG"
-      SecurityGroupIngress:
-        # Allow HTTP and HTTPS from anywhere
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
 
-  # Security Group for Web Servers
   WebServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -133,18 +140,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-WebServerSG"
-      SecurityGroupIngress:
-        # Allow HTTP/HTTPS from Load Balancer SG
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
 
-  # Security Group for Database Server
   DatabaseServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -153,14 +149,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-DatabaseServerSG"
-      SecurityGroupIngress:
-        # Allow MySQL from Web Servers SG
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          SourceSecurityGroupId: !Ref WebServerSecurityGroup
 
-  # Security Group for Cache Server (Redis and Memcached)
   CacheServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -169,19 +158,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-CacheServerSG"
-      SecurityGroupIngress:
-        # Allow Redis from Web Servers SG
-        - IpProtocol: tcp
-          FromPort: 6379
-          ToPort: 6379
-          SourceSecurityGroupId: !Ref WebServerSecurityGroup
-        # Allow Memcached from Web Servers SG
-        - IpProtocol: tcp
-          FromPort: 11211
-          ToPort: 11211
-          SourceSecurityGroupId: !Ref WebServerSecurityGroup
 
-  # Security Group for Worker Servers
   WorkerServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -190,91 +167,189 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-WorkerServerSG"
-      SecurityGroupIngress:
-        # Allow MySQL and Redis from Web Servers SG
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          SourceSecurityGroupId: !Ref WebServerSecurityGroup
-        - IpProtocol: tcp
-          FromPort: 6379
-          ToPort: 6379
-          SourceSecurityGroupId: !Ref WebServerSecurityGroup
-        # Allow Memcached from Web Servers SG
-        - IpProtocol: tcp
-          FromPort: 11211
-          ToPort: 11211
-          SourceSecurityGroupId: !Ref WebServerSecurityGroup
 
-  # Egress rules moved to avoid circular dependency
-  LoadBalancerSecurityGroupEgress:
-    Type: AWS::EC2::SecurityGroupEgress
+  # Ingress Rules for Load Balancer (HTTP/HTTPS access)
+  LoadBalancerIngress:
+    Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId: !Ref LoadBalancerSecurityGroup
       IpProtocol: tcp
       FromPort: 80
       ToPort: 80
-      DestinationSecurityGroupId: !Ref WebServerSecurityGroup
+      CidrIp: 0.0.0.0/0 # Open HTTP (Port 80) to all
 
-  LoadBalancerSecurityGroupEgressHTTPS:
-    Type: AWS::EC2::SecurityGroupEgress
+  LoadBalancerIngressHTTPS:
+    Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId: !Ref LoadBalancerSecurityGroup
       IpProtocol: tcp
       FromPort: 443
       ToPort: 443
-      DestinationSecurityGroupId: !Ref WebServerSecurityGroup
+      CidrIp: 0.0.0.0/0 # Open HTTPS (Port 443) to all
 
-  WebServerSecurityGroupEgressMySQL:
-    Type: AWS::EC2::SecurityGroupEgress
+  # Ingress Rules for Web Servers (Allowing access from Load Balancer)
+  WebServerIngress:
+    Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId: !Ref WebServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup # HTTP from Load Balancer
+
+  WebServerIngressHTTPS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref WebServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup # HTTPS from Load Balancer
+
+  # Ingress Rules for Database Server
+  DatabaseServerIngressWeb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DatabaseServerSecurityGroup
       IpProtocol: tcp
       FromPort: 3306
       ToPort: 3306
-      DestinationSecurityGroupId: !Ref DatabaseServerSecurityGroup
+      SourceSecurityGroupId: !Ref WebServerSecurityGroup # MySQL access from Web Servers
 
-  WebServerSecurityGroupEgressRedis:
-    Type: AWS::EC2::SecurityGroupEgress
+  DatabaseServerIngressWorker:
+    Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      GroupId: !Ref WebServerSecurityGroup
+      GroupId: !Ref DatabaseServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref WorkerServerSecurityGroup # MySQL access from Worker Servers
+
+  # Trusted IPs for direct access to Database Server (MySQL)
+  DatabaseServerIngressTrustedIP1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasTrustedDBCacheIP1
+    Properties:
+      GroupId: !Ref DatabaseServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      CidrIp: !Ref TrustedIPForDBCache1 # MySQL access from Trusted IP 1
+
+  DatabaseServerIngressTrustedIP2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasTrustedDBCacheIP2
+    Properties:
+      GroupId: !Ref DatabaseServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      CidrIp: !Ref TrustedIPForDBCache2 # MySQL access from Trusted IP 2
+
+  # Ingress Rules for Cache Server (Redis and Memcached)
+  CacheServerIngressWeb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref CacheServerSecurityGroup
       IpProtocol: tcp
       FromPort: 6379
       ToPort: 6379
-      DestinationSecurityGroupId: !Ref CacheServerSecurityGroup
+      SourceSecurityGroupId: !Ref WebServerSecurityGroup # Redis access from Web Servers
 
-  WebServerSecurityGroupEgressMemcached:
-    Type: AWS::EC2::SecurityGroupEgress
+  CacheServerIngressWorker:
+    Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      GroupId: !Ref WebServerSecurityGroup
+      GroupId: !Ref CacheServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !Ref WorkerServerSecurityGroup # Redis access from Worker Servers
+
+  # Trusted IPs for direct access to Cache Server (Redis)
+  CacheServerIngressTrustedIP1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasTrustedDBCacheIP1
+    Properties:
+      GroupId: !Ref CacheServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      CidrIp: !Ref TrustedIPForDBCache1 # Redis access from Trusted IP 1
+
+  CacheServerIngressTrustedIP2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasTrustedDBCacheIP2
+    Properties:
+      GroupId: !Ref CacheServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      CidrIp: !Ref TrustedIPForDBCache2 # Redis access from Trusted IP 2
+
+  # Memcached Ingress Rules for Cache Server
+  CacheServerMemcachedIngressWeb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref CacheServerSecurityGroup
       IpProtocol: tcp
       FromPort: 11211
       ToPort: 11211
-      DestinationSecurityGroupId: !Ref CacheServerSecurityGroup
+      SourceSecurityGroupId: !Ref WebServerSecurityGroup # Memcached access from Web Servers
 
-  WorkerServerSecurityGroupEgressMySQL:
-    Type: AWS::EC2::SecurityGroupEgress
+  CacheServerMemcachedIngressWorker:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref CacheServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 11211
+      ToPort: 11211
+      SourceSecurityGroupId: !Ref WorkerServerSecurityGroup # Memcached access from Worker Servers
+
+  # Trusted IPs for direct access to Cache Server (Memcached)
+  CacheServerMemcachedIngressTrustedIP1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasTrustedDBCacheIP1
+    Properties:
+      GroupId: !Ref CacheServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 11211
+      ToPort: 11211
+      CidrIp: !Ref TrustedIPForDBCache1 # Memcached access from Trusted IP 1
+
+  CacheServerMemcachedIngressTrustedIP2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasTrustedDBCacheIP2
+    Properties:
+      GroupId: !Ref CacheServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 11211
+      ToPort: 11211
+      CidrIp: !Ref TrustedIPForDBCache2 # Memcached access from Trusted IP 2
+
+  # Ingress Rules for Worker Servers
+  WorkerServerIngressMySQL:
+    Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId: !Ref WorkerServerSecurityGroup
       IpProtocol: tcp
       FromPort: 3306
       ToPort: 3306
-      DestinationSecurityGroupId: !Ref DatabaseServerSecurityGroup
+      SourceSecurityGroupId: !Ref DatabaseServerSecurityGroup # MySQL access for Worker Servers
 
-  WorkerServerSecurityGroupEgressRedis:
-    Type: AWS::EC2::SecurityGroupEgress
+  WorkerServerIngressRedis:
+    Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId: !Ref WorkerServerSecurityGroup
       IpProtocol: tcp
       FromPort: 6379
       ToPort: 6379
-      DestinationSecurityGroupId: !Ref CacheServerSecurityGroup
+      SourceSecurityGroupId: !Ref CacheServerSecurityGroup # Redis access for Worker Servers
 
-  WorkerServerSecurityGroupEgressMemcached:
-    Type: AWS::EC2::SecurityGroupEgress
+  WorkerServerIngressMemcached:
+    Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId: !Ref WorkerServerSecurityGroup
       IpProtocol: tcp
       FromPort: 11211
       ToPort: 11211
-      DestinationSecurityGroupId: !Ref CacheServerSecurityGroup
+      SourceSecurityGroupId: !Ref CacheServerSecurityGroup # Memcached access for Worker Servers
