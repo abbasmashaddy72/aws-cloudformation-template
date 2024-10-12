@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "Deploys a global CloudTrail with optional alarms for monitoring security events and logging to an internal or external S3 bucket."
+Description: "Deploys a global CloudTrail with optional alarms for monitoring security events and logging to an internal S3 bucket."
 
 # Metadata for grouping parameters in the AWS Management Console for easier readability
 Metadata:
@@ -10,7 +10,6 @@ Metadata:
         Parameters:
           - ParentAlertStack
           - CloudWatchLogsRetentionInDays
-          - ExternalTrailBucket
           - LogFilePrefix
           - S3DataEvents
       - Label:
@@ -52,10 +51,6 @@ Parameters:
         1827,
         3653,
       ]
-  ExternalTrailBucket:
-    Description: "Optional: External S3 bucket name where CloudTrail logs will be stored. If empty, an internal bucket is created."
-    Type: String
-    Default: ""
   LogFilePrefix:
     Description: "Optional: Prefix for log file names."
     Type: String
@@ -94,8 +89,6 @@ Parameters:
 Conditions:
   HasAlertTopic: !Not [!Equals [!Ref ParentAlertStack, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundary, ""]]
-  ExternalBucket: !Not [!Equals [!Ref ExternalTrailBucket, ""]]
-  InternalBucket: !Equals [!Ref ExternalTrailBucket, ""]
   HasLogFilePrefix: !Not [!Equals [!Ref LogFilePrefix, ""]]
   IsS3DataEvents: !Equals [!Ref S3DataEvents, "true"]
   UseSSEKMS: !Equals [!Ref S3EncryptionType, "SSE-KMS"]
@@ -136,9 +129,8 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
-  # Creates an internal S3 bucket if an external one is not provided
+  # Creates an internal S3 bucket for CloudTrail logs
   TrailBucket:
-    Condition: InternalBucket
     Type: "AWS::S3::Bucket"
     Properties:
       BucketName: !Sub "${AWS::AccountId}-cloudtrail-logs-${AWS::Region}"
@@ -163,7 +155,6 @@ Resources:
 
   # S3 bucket policy for CloudTrail logging
   TrailBucketPolicy:
-    Condition: InternalBucket
     Type: "AWS::S3::BucketPolicy"
     Properties:
       Bucket: !Ref TrailBucket
@@ -354,42 +345,6 @@ Resources:
       Source:
         Owner: "AWS"
         SourceIdentifier: "CLOUD_TRAIL_ENABLED"
-
-  # External CloudTrail resource if an external bucket is provided
-  ExternalTrail:
-    Condition: ExternalBucket
-    DependsOn:
-      - TrailTopicPolicy
-    Type: "AWS::CloudTrail::Trail"
-    Properties:
-      IncludeGlobalServiceEvents: true
-      IsLogging: true
-      IsMultiRegionTrail: true
-      EventSelectors:
-        - !If
-          - IsS3DataEvents
-          - - DataResources:
-                - Type: "AWS::S3::Object"
-                  Values:
-                    - "arn:aws:s3:::"
-              IncludeManagementEvents: true
-              ReadWriteType: All
-          - - DataResources:
-                - Type: "AWS::S3::Object"
-                  Values:
-                    - "arn:aws:s3:::"
-                - Type: "AWS::RDS::DBInstance"
-                  Values:
-                    - "arn:aws:rds:::"
-                - Type: "AWS::Kinesis::Stream"
-                  Values:
-                    - "arn:aws:kinesis:::"
-      S3BucketName: !Ref ExternalTrailBucket
-      S3KeyPrefix: !Ref LogFilePrefix
-      EnableLogFileValidation: true
-      CloudWatchLogsLogGroupArn: !GetAtt "TrailLogGroup.Arn"
-      CloudWatchLogsRoleArn: !GetAtt "TrailLogGroupRole.Arn"
-      SnsTopicName: !GetAtt "TrailTopic.TopicName"
 
   # Unauthorized API Operation Metric Filter
   UnauthorizedOperationMetricFilter:
